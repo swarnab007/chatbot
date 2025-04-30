@@ -2,18 +2,22 @@ import axios from "axios";
 
 const AMADEUS_CLIENT_ID = "5lp3uACGJglsPsC0rc7XaZV9BesPLG8t";
 const AMADEUS_CLIENT_SECRET = "bHJGPfWzGYEhHFEo";
-const AMADEUS_AUTH_URL = "https://test.api.amadeus.com/v1/security/oauth2/token";
-const AMADEUS_FLIGHTS_URL = "https://test.api.amadeus.com/v2/shopping/flight-offers";
-const AMADEUS_LOCATION_URL = "https://test.api.amadeus.com/v1/reference-data/locations";
+const AMADEUS_AUTH_URL =
+  "https://test.api.amadeus.com/v1/security/oauth2/token";
+const AMADEUS_FLIGHTS_URL =
+  "https://test.api.amadeus.com/v2/shopping/flight-offers";
+const AMADEUS_LOCATION_URL =
+  "https://test.api.amadeus.com/v1/reference-data/locations";
 
 let accessToken: string;
-let tokenExpiry: number | null = null;
+let tokenExpiry: number;
 
-// Types
+// ========== Types ==========
+
 export interface FlightSearch {
   departure: string; // city name or code
-  arrival: string;   // city name or code
-  date: string;      // YYYY-MM-DD
+  arrival: string; // city name or code
+  date: string; // YYYY-MM-DD
 }
 
 export interface Flight {
@@ -29,7 +33,8 @@ export interface Flight {
   seat_availability: number;
 }
 
-// Get access token (with caching)
+// ========== Access Token ==========
+
 const getAccessToken = async (): Promise<string> => {
   if (accessToken && tokenExpiry && Date.now() < tokenExpiry) {
     return accessToken;
@@ -50,8 +55,21 @@ const getAccessToken = async (): Promise<string> => {
   return accessToken;
 };
 
-// Convert city name to IATA code using Amadeus API
-const getIataCodeFromCity = async (cityName: string): Promise<string | null> => {
+// ========== Helper: Normalize ISO date ==========
+
+const formatToIsoDate = (rawDate: string): string => {
+  const date = new Date(rawDate);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+// ========== City → IATA Code Resolver ==========
+
+const getIataCodeFromCity = async (
+  cityName: string
+): Promise<string | null> => {
   try {
     const token = await getAccessToken();
 
@@ -59,7 +77,7 @@ const getIataCodeFromCity = async (cityName: string): Promise<string | null> => 
       params: {
         keyword: cityName,
         subType: "CITY,AIRPORT",
-        'page[limit]': 1,
+        "page[limit]": 5,
       },
       headers: {
         Authorization: `Bearer ${token}`,
@@ -67,17 +85,39 @@ const getIataCodeFromCity = async (cityName: string): Promise<string | null> => 
     });
 
     const locations = response.data?.data;
+
     if (locations && locations.length > 0) {
-      return locations[0].iataCode;
+      const match = locations.find((loc: any) => loc.iataCode?.length === 3);
+      return match?.iataCode || locations[0].iataCode;
     }
-    return null;
+
+    // Fallback map for common cities
+    const fallbackMap: Record<string, string> = {
+      kolkata: "CCU",
+      calcutta: "CCU",
+      mumbai: "BOM",
+      delhi: "DEL",
+      bangalore: "BLR",
+      chennai: "MAA",
+      hyderabad: "HYD",
+      singapore: "SIN",
+      dubai: "DXB",
+      london: "LHR",
+      paris: "CDG",
+      tokyo: "HND",
+      newyork: "JFK",
+      nyc: "JFK",
+    };
+
+    return fallbackMap[cityName.toLowerCase()] || null;
   } catch (error) {
     console.error("Error fetching IATA code:", error);
     return null;
   }
 };
 
-// Main search function
+// ========== Flight Search ==========
+
 const searchFlights = async (search: FlightSearch): Promise<Flight[]> => {
   try {
     const token = await getAccessToken();
@@ -96,7 +136,7 @@ const searchFlights = async (search: FlightSearch): Promise<Flight[]> => {
           id: "1",
           originLocationCode: departureCode,
           destinationLocationCode: arrivalCode,
-          departureDateTimeRange: { date: search.date },
+          departureDateTimeRange: { date: formatToIsoDate(search.date) },
         },
       ],
       travelers: [{ id: "1", travelerType: "ADULT" }],
@@ -134,7 +174,9 @@ const searchFlights = async (search: FlightSearch): Promise<Flight[]> => {
   }
 };
 
+// ========== Export ==========
+
 export default {
   searchFlights,
-  getIataCodeFromCity, // Optional: expose this if chatbot wants to suggest cities
+  getIataCodeFromCity,
 };
